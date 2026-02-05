@@ -3,22 +3,110 @@
 <head>
   <meta charset="UTF-8">
   <title>DuckDB-WASM Parquet Viewer</title>
-  <style>
-    body { font-family: sans-serif; padding: 20px; }
-    table { border-collapse: collapse; margin-top: 10px; }
-    th, td { border: 1px solid #999; padding: 5px 10px; }
-  </style>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <h1>DuckDB-WASM Parquet Viewer</h1>
   <input type="file" id="file" accept=".parquet">
+  <div>
+    <select id="codeFilter" disabled>
+      <option value="">Select Code...</option>
+    </select>
+    <select id="periodeFilter" disabled>
+      <option value="">Select Periode...</option>
+    </select>
+    <select id="code1Filter" disabled>
+      <option value="">Select Code1...</option>
+    </select>
+    <button id="showAll" disabled>Show All</button>
+  </div>
+  <div id="loading" style="display: none;">Loading...</div>
+  <div id="error" style="display: none; color: red;"></div>
   <div id="out"></div>
 
   <script type="module">
     import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm";
 
+    // DOM elements
     const input = document.getElementById("file");
     const out = document.getElementById("out");
+    const loading = document.getElementById("loading");
+    const errorDiv = document.getElementById("error");
+    const codeFilter = document.getElementById("codeFilter");
+    const periodeFilter = document.getElementById("periodeFilter");
+    const code1Filter = document.getElementById("code1Filter");
+    const showAllBtn = document.getElementById("showAll");
+
+    // Constants
+    const PARQUET_FILE = 'data.parquet';
+
+    let conn = null;
+
+    // Show/hide loading indicator
+    function setLoading(isLoading) {
+      loading.style.display = isLoading ? 'block' : 'none';
+      out.style.display = isLoading ? 'none' : 'block';
+    }
+
+    // Show error message
+    function showError(message) {
+      errorDiv.textContent = `Error: ${message}`;
+      errorDiv.style.display = 'block';
+      setTimeout(() => errorDiv.style.display = 'none', 5000);
+    }
+
+    // Escape single quotes for SQL
+    function escapeSql(value) {
+      return value.replace(/'/g, "''");
+    }
+
+    // Format timestamp to dd/mm/yyyy
+    function formatDate(timestamp) {
+      if (!timestamp) return '';
+      const date = new Date(timestamp);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    // Format number with thousands separator and 2 decimals
+    function formatNumber(num) {
+      if (num === null || num === undefined || num === '') return '';
+      return Number(num).toLocaleString('nl-NL', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    // Format cell value based on column name
+    function formatCell(header, value) {
+      if (header === 'Boekdatum') {
+        return formatDate(value);
+      } else if (header === 'Saldo') {
+        return formatNumber(value);
+      }
+      return value;
+    }
+
+    // Populate dropdown with unique values
+    async function populateDropdown(dropdown, columnName, defaultText) {
+      try {
+        const query = `SELECT DISTINCT ${columnName} FROM read_parquet('${PARQUET_FILE}') ORDER BY ${columnName}`;
+        const result = await conn.query(query);
+        const rows = result.toArray();
+
+        dropdown.innerHTML = `<option value="">${defaultText}</option>`;
+        rows.forEach(row => {
+          const option = document.createElement('option');
+          option.value = row[columnName];
+          option.textContent = row[columnName];
+          dropdown.appendChild(option);
+        });
+      } catch (error) {
+        showError(`Failed to populate ${columnName}: ${error.message}`);
+      }
+    }
 
     // Convert array of objects to HTML table
     function renderTable(rows) {
@@ -30,40 +118,107 @@
             <tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr>
           </thead>
           <tbody>
-            ${rows.map(r => `<tr>${headers.map(h => `<td>${r[h]}</td>`).join("")}</tr>`).join("")}
+            ${rows.map(r => `<tr>${headers.map(h => {
+              const value = formatCell(h, r[h]);
+              const align = h === 'Saldo' ? ' style="text-align: right;"' : '';
+              return `<td${align}>${value}</td>`;
+            }).join("")}</tr>`).join("")}
           </tbody>
         </table>
       `;
+    }
+
+    async function loadAndDisplayData(query) {
+      try {
+        setLoading(true);
+        const result = await conn.query(query);
+        const rows = result.toArray();
+        out.innerHTML = renderTable(rows);
+      } catch (error) {
+        showError(`Failed to load data: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
     }
 
     input.onchange = async () => {
       const file = input.files[0];
       if (!file) return;
 
-      // Load DuckDB-WASM bundle
-      const bundles = duckdb.getJsDelivrBundles();
-      const bundle = await duckdb.selectBundle(bundles);
-      const worker = new Worker(URL.createObjectURL(
-        new Blob([`importScripts("${bundle.mainWorker}")`])
-      ));
+      try {
+        setLoading(true);
 
-      const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-      await db.instantiate(bundle.mainModule);
-      const conn = await db.connect();
+        // Load DuckDB-WASM bundle
+        const bundles = duckdb.getJsDelivrBundles();
+        const bundle = await duckdb.selectBundle(bundles);
+        const worker = new Worker(URL.createObjectURL(
+          new Blob([`importScripts("${bundle.mainWorker}")`])
+        ));
 
-      // Register the uploaded Parquet file
-      await db.registerFileHandle(
-        "data.parquet",
-        file,
-        duckdb.DuckDBDataProtocol.BROWSER_FILEREADER
-      );
+        const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+        await db.instantiate(bundle.mainModule);
+        conn = await db.connect();
 
-      // Query the Parquet file
-      const result = await conn.query(`SELECT * FROM read_parquet('data.parquet')`);
-      const rows = result.toArray();
+        // Register the uploaded Parquet file
+        await db.registerFileHandle(
+          PARQUET_FILE,
+          file,
+          duckdb.DuckDBDataProtocol.BROWSER_FILEREADER
+        );
 
-      // Display as table
-      out.innerHTML = renderTable(rows);
+        // Query and display all data
+        await loadAndDisplayData(`SELECT * FROM read_parquet('${PARQUET_FILE}')`);
+
+        // Populate all dropdowns using the helper function
+        await Promise.all([
+          populateDropdown(codeFilter, 'Code', 'Select Code...'),
+          populateDropdown(periodeFilter, 'Periode', 'Select Periode...'),
+          populateDropdown(code1Filter, 'Code1', 'Select Code1...')
+        ]);
+
+        // Enable filters
+        codeFilter.disabled = false;
+        periodeFilter.disabled = false;
+        code1Filter.disabled = false;
+        showAllBtn.disabled = false;
+      } catch (error) {
+        showError(`Failed to load file: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Build WHERE clause based on active filters with SQL escaping
+    function buildWhereClause() {
+      const conditions = [];
+      if (codeFilter.value) {
+        conditions.push(`Code = '${escapeSql(codeFilter.value)}'`);
+      }
+      if (periodeFilter.value) {
+        conditions.push(`Periode = '${escapeSql(periodeFilter.value)}'`);
+      }
+      if (code1Filter.value) {
+        conditions.push(`Code1 = '${escapeSql(code1Filter.value)}'`);
+      }
+      return conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    }
+
+    // Apply filters and reload data
+    async function applyFilters() {
+      const whereClause = buildWhereClause();
+      await loadAndDisplayData(`SELECT * FROM read_parquet('${PARQUET_FILE}')${whereClause}`);
+    }
+
+    // Event handlers for filters
+    codeFilter.onchange = applyFilters;
+    periodeFilter.onchange = applyFilters;
+    code1Filter.onchange = applyFilters;
+
+    showAllBtn.onclick = async () => {
+      codeFilter.value = "";
+      periodeFilter.value = "";
+      code1Filter.value = "";
+      await loadAndDisplayData(`SELECT * FROM read_parquet('${PARQUET_FILE}')`);
     };
   </script>
 </body>

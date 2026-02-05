@@ -1,0 +1,19 @@
+{
+  "name": "duck_ui5",
+  "version": "0.0.2",
+  "description": "DuckDB-WASM Parquet Viewer - Excel to Parquet converter with interactive web viewer",
+  "scripts": {
+    "prepare": "husky"
+  },
+  "keywords": [
+    "duckdb",
+    "parquet",
+    "excel",
+    "data-viewer"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}
