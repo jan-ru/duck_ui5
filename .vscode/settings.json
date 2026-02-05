@@ -1,0 +1,6 @@
+{
+    "powerquery.client.additionalSymbolsDirectories": [
+        "c:/Users/jrmulle/projects/duckdb/.vscode/excel-pq-symbols",
+        "c:/Users/jrmulle/projects/duck_ui5/.vscode/excel-pq-symbols"
+    ]
+}
