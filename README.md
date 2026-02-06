@@ -113,12 +113,47 @@ duck_ui5/
 ├── index.html              # Main web viewer interface
 ├── styles.css              # Styling for the web interface
 ├── process_dump.py         # Python data transformation script
+├── transform_trial_balances.py # Trial balance transformation script
+├── fac_TrialBalances.m     # Reference Power Query logic
 ├── deno.json              # Deno configuration
 ├── main.ts                # TypeScript entry point
 ├── import/                # Place source Excel files here (gitignored)
-├── export/                # Generated Parquet files (gitignored)
+├── export/                # Generated Parquet/DuckDB files (gitignored)
 └── .venv/                 # Python virtual environment (gitignored)
 ```
+
+## Trial Balance Transformation
+
+Transform Excel trial balance exports to DuckDB using `transform_trial_balances.py`.
+
+### Usage
+
+```bash
+uv run python transform_trial_balances.py
+```
+
+### Input
+
+- `import/2025_BalansenWinstverliesperperiode.xlsx` - Trial balance with monthly columns
+
+### Output
+
+- `export/trial_balances.duckdb` - DuckDB database with `fct_TrialBalances` table
+
+### Transformation Logic
+
+The script replicates the Power Query logic from `fac_TrialBalances.m`:
+
+1. **Unpivot** monthly columns (Openingsbalans, januari-december) to long format
+2. **Map columns**:
+   - `CodeDimensietype` → `Code0` (BAS/PNL)
+   - `CodeRapportagestructuurgroep1` → `Code1` (account category)
+3. **Calculate DisplayValue** with sign correction:
+   - Activa (000-050): positive
+   - Passiva (060-080): negative
+   - Gross Margin (500-510): negative
+   - Expenses (520-550): negative
+4. **Generate profit rows** (synthetic account 9999) per period
 
 ## Data Transformations
 
