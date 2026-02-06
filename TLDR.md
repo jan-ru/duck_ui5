@@ -1,0 +1,2 @@
+20260113 - cap9ui5_3apps: This project is an SAP Cloud Application Programming Model (CAP) application that provides advanced analytics for Sales and General Ledger data. It integrates OData V4 services with a responsive OpenUI5 frontend. This dbt project transforms raw financial data from Twinfield accounting exports into analytics-ready models for the CAP application. It uses DuckDB as the analytical database engine.
+

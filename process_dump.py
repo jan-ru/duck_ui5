@@ -1,4 +1,5 @@
 import pandas as pd
+import duckdb
 
 # Read the Excel file
 df = pd.read_excel('import/DUMP_13jun25.xls')
@@ -16,8 +17,11 @@ df['Boekdatum'] = pd.to_datetime(df['Boekdatum'], unit='ms')
 # Pad CodeGrootboekrekening to 4 positions with leading zeros
 df['CodeGrootboekrekening'] = df['CodeGrootboekrekening'].astype(str).str.zfill(4)
 
-# Write to parquet
-df.to_parquet('export/DUMP_13jun25.parquet', index=False)
+# Write to DuckDB
+db_path = 'export/2023_transactions.db'
+con = duckdb.connect(db_path)
+con.execute("CREATE OR REPLACE TABLE transactions AS SELECT * FROM df")
+con.close()
 
-print(f"\nFile written successfully to export/DUMP_13jun25.parquet")
+print(f"\nDatabase written successfully to {db_path}")
 print(f"Final dimensions: {len(df)} rows, {len(df.columns)} columns")

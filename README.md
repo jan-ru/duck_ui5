@@ -1,11 +1,11 @@
-# DuckDB-WASM Parquet Viewer
+# DuckDB-WASM Viewer
 
-A web-based data viewer that converts Excel files to Parquet format and provides interactive filtering and visualization using DuckDB-WASM.
+A web-based data viewer that converts Excel files to DuckDB format and provides interactive filtering and visualization using DuckDB-WASM.
 
 ## Overview
 
 This project provides a simple workflow for:
-1. Converting Excel (.xls) files to optimized Parquet format with data transformations
+1. Converting Excel (.xls) files to optimized DuckDB database with data transformations
 2. Viewing and filtering the data in a web browser using DuckDB-WASM
 3. Interactive filtering by multiple dimensions (Code, Periode, Code1)
 
@@ -16,7 +16,7 @@ graph LR
     C --> D[Remove Columns]
     C --> E[Convert Dates]
     C --> F[Pad Codes]
-    D --> G[Parquet File<br/>export/DUMP_13jun25.parquet]
+    D --> G[DuckDB Database<br/>export/2023_transactions.db]
     E --> G
     F --> G
     G --> H[Web Browser<br/>index.html]
@@ -32,14 +32,15 @@ graph LR
 
 ## Features
 
-- **Data Transformation**: Python script to convert Excel to Parquet with:
+- **Data Transformation**: Python script to convert Excel to DuckDB with:
   - Column removal (removes unnecessary columns)
   - Date conversion (millisecond timestamps to proper datetime)
   - Code padding (CodeGrootboekrekening padded to 4 digits)
 
 - **Web Viewer**: Browser-based interface with:
-  - Drag-and-drop Parquet file loading
+  - Drag-and-drop DuckDB database file loading
   - Three filter dropdowns (Code, Periode, Code1) that work together
+  - Account rollup feature - aggregate transactions by account with total balances
   - Formatted display (dates as dd/mm/yyyy, numbers with thousand separators)
   - Right-aligned currency values
   - Small table font (10px) for dense data viewing
@@ -50,7 +51,7 @@ graph LR
 - Python 3.12+
 - uv (Python package manager)
 - pandas 3.0
-- pyarrow
+- duckdb
 - openpyxl
 - xlrd
 
@@ -68,7 +69,7 @@ source .venv/bin/activate  # On macOS/Linux
 
 2. Install Python dependencies:
 ```bash
-uv pip install pandas>=3.0 pyarrow openpyxl xlrd
+uv pip install pandas>=3.0 duckdb openpyxl xlrd
 ```
 
 ## Usage
@@ -90,21 +91,22 @@ This will:
 - Remove columns: Btwbedrag, Boekingsstatus, CodeAdministratie, Code2, Debet, Credit, Btwcode, Nummer
 - Convert Boekdatum to datetime format
 - Pad CodeGrootboekrekening to 4 digits with leading zeros
-- Save the result to `export/DUMP_13jun25.parquet`
+- Save the result to `export/2023_transactions.db`
 
 ### Viewing Data
 
 1. Open `index.html` in a web browser
 
-2. Click "Choose File" and select the Parquet file from the `export/` directory
+2. Click "Choose File" and select the DuckDB database file from the `export/` directory
 
 3. Use the filter dropdowns to explore the data:
    - **Select Code**: Filter by transaction code
    - **Select Periode**: Filter by period
    - **Select Code1**: Filter by Code1 value
    - **Show All**: Clear all filters and show all records
+   - **Rollup Accounts**: Aggregate transactions by account, showing totals per account
 
-Filters can be combined - selecting multiple filters will show only records that match all criteria (AND logic).
+Filters can be combined - selecting multiple filters will show only records that match all criteria (AND logic). The Rollup Accounts feature respects active filters, allowing you to see account totals for filtered data.
 
 ## Project Structure
 
@@ -115,10 +117,12 @@ duck_ui5/
 ├── process_dump.py         # Python data transformation script
 ├── transform_trial_balances.py # Trial balance transformation script
 ├── fac_TrialBalances.m     # Reference Power Query logic
-├── deno.json              # Deno configuration
-├── main.ts                # TypeScript entry point
+├── package.json           # Node.js package configuration
+├── LICENSE.md             # MIT License
+├── .gitignore             # Git ignore rules
+├── README.md              # Project documentation
 ├── import/                # Place source Excel files here (gitignored)
-├── export/                # Generated Parquet/DuckDB files (gitignored)
+├── export/                # Generated DuckDB files (gitignored)
 └── .venv/                 # Python virtual environment (gitignored)
 ```
 
@@ -176,8 +180,8 @@ The web viewer applies the following display formatting:
 
 ## Technical Details
 
-- **DuckDB-WASM**: In-browser SQL engine for querying Parquet files
-- **Parquet Format**: Columnar storage format for efficient querying
+- **DuckDB-WASM**: In-browser SQL engine for querying DuckDB databases
+- **DuckDB Format**: Embedded analytical database for efficient querying
 - **Pandas 3.0**: Latest version for data transformation
 - **No Backend Required**: Everything runs client-side
 
@@ -195,4 +199,4 @@ Tested on:
 
 ## License
 
-This project is for internal use.
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.

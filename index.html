@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>DuckDB-WASM Parquet Viewer</title>
+  <title>DuckDB-WASM Viewer</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>DuckDB-WASM Parquet Viewer</h1>
-  <input type="file" id="file" accept=".parquet">
+  <h1>DuckDB-WASM Viewer</h1>
+  <input type="file" id="file" accept=".db">
   <div>
     <select id="codeFilter" disabled>
       <option value="">Select Code...</option>
@@ -19,6 +19,7 @@
       <option value="">Select Code1...</option>
     </select>
     <button id="showAll" disabled>Show All</button>
+    <button id="rollupAccounts" disabled>Rollup Accounts</button>
   </div>
   <div id="loading" style="display: none;">Loading...</div>
   <div id="error" style="display: none; color: red;"></div>
@@ -36,9 +37,11 @@
     const periodeFilter = document.getElementById("periodeFilter");
     const code1Filter = document.getElementById("code1Filter");
     const showAllBtn = document.getElementById("showAll");
+    const rollupAccountsBtn = document.getElementById("rollupAccounts");
 
     // Constants
-    const PARQUET_FILE = 'data.parquet';
+    const DB_FILE = 'data.db';
+    const TABLE_NAME = 'uploaded_db.transactions';
 
     let conn = null;
 
@@ -92,7 +95,7 @@
     // Populate dropdown with unique values
     async function populateDropdown(dropdown, columnName, defaultText) {
       try {
-        const query = `SELECT DISTINCT ${columnName} FROM read_parquet('${PARQUET_FILE}') ORDER BY ${columnName}`;
+        const query = `SELECT DISTINCT ${columnName} FROM ${TABLE_NAME} ORDER BY ${columnName}`;
         const result = await conn.query(query);
         const rows = result.toArray();
 
@@ -159,15 +162,18 @@
         await db.instantiate(bundle.mainModule);
         conn = await db.connect();
 
-        // Register the uploaded Parquet file
+        // Register the uploaded DuckDB file
         await db.registerFileHandle(
-          PARQUET_FILE,
+          DB_FILE,
           file,
           duckdb.DuckDBDataProtocol.BROWSER_FILEREADER
         );
 
+        // Attach the database
+        await conn.query(`ATTACH '${DB_FILE}' AS uploaded_db`);
+
         // Query and display all data
-        await loadAndDisplayData(`SELECT * FROM read_parquet('${PARQUET_FILE}')`);
+        await loadAndDisplayData(`SELECT * FROM ${TABLE_NAME}`);
 
         // Populate all dropdowns using the helper function
         await Promise.all([
@@ -181,6 +187,7 @@
         periodeFilter.disabled = false;
         code1Filter.disabled = false;
         showAllBtn.disabled = false;
+        rollupAccountsBtn.disabled = false;
       } catch (error) {
         showError(`Failed to load file: ${error.message}`);
       } finally {
@@ -206,7 +213,22 @@
     // Apply filters and reload data
     async function applyFilters() {
       const whereClause = buildWhereClause();
-      await loadAndDisplayData(`SELECT * FROM read_parquet('${PARQUET_FILE}')${whereClause}`);
+      await loadAndDisplayData(`SELECT * FROM ${TABLE_NAME}${whereClause}`);
+    }
+
+    // Perform rollup on accounts
+    async function rollupAccounts() {
+      const whereClause = buildWhereClause();
+      const query = `
+        SELECT
+          CodeGrootboekrekening,
+          NaamGrootboekrekening,
+          SUM(Saldo) as Saldo
+        FROM ${TABLE_NAME}${whereClause}
+        GROUP BY CodeGrootboekrekening, NaamGrootboekrekening
+        ORDER BY CodeGrootboekrekening
+      `;
+      await loadAndDisplayData(query);
     }
 
     // Event handlers for filters
@@ -218,8 +240,10 @@
       codeFilter.value = "";
       periodeFilter.value = "";
       code1Filter.value = "";
-      await loadAndDisplayData(`SELECT * FROM read_parquet('${PARQUET_FILE}')`);
+      await loadAndDisplayData(`SELECT * FROM ${TABLE_NAME}`);
     };
+
+    rollupAccountsBtn.onclick = rollupAccounts;
   </script>
 </body>
 </html>
