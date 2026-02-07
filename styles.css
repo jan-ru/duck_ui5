@@ -4,6 +4,55 @@ body {
   padding: 20px;
 }
 
+/* Navigation */
+nav {
+  background-color: #f5f5f5;
+  padding: 10px 20px;
+  margin: -20px -20px 20px;
+  border-bottom: 2px solid #007bff;
+}
+
+.nav-link {
+  display: inline-block;
+  padding: 8px 16px;
+  margin-right: 10px;
+  text-decoration: none;
+  color: #333;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover {
+  color: #007bff;
+}
+
+.nav-link.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+  font-weight: 600;
+}
+
+/* Page container */
+.page {
+  display: none;
+}
+
+.page.active {
+  display: block;
+}
+
+/* Row count display */
+.row-count {
+  margin: 10px 0;
+  padding: 8px 12px;
+  background-color: #f5f5f5;
+  border-left: 4px solid #2196f3;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
 /* Table styling */
 table {
   border-collapse: collapse;
@@ -75,7 +124,7 @@ button:disabled {
 }
 
 /* Error message styling */
-#error {
+#error, #schema-error {
   margin: 20px 0;
   padding: 15px;
   background-color: #ffebee;
@@ -83,4 +132,31 @@ button:disabled {
   border-radius: 4px;
   font-size: 14px;
   color: #c62828;
+}
+
+/* Schema page loading indicator */
+#schema-loading {
+  margin: 20px 0;
+  padding: 15px;
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196f3;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #1976d2;
+}
+
+/* Schema diagram container */
+#schema-diagram {
+  margin-top: 20px;
+  overflow-x: auto;
+  padding: 20px;
+  background-color: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+/* Mermaid SVG scaling */
+#schema-diagram svg {
+  max-width: 100%;
+  height: auto;
 }

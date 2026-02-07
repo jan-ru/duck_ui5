@@ -6,7 +6,6 @@ env/
 # Node modules
 node_modules/
 package-lock.json
-.husky/
 
 # Data directories
 import/
@@ -17,6 +16,19 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Linting and formatting
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
 # Distribution / packaging
 .Python

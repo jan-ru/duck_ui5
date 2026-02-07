@@ -8,6 +8,7 @@ import duckdb
 from pathlib import Path
 from datetime import date
 import calendar
+from utils import pad_account_code
 
 
 # Mapping Dutch month names to month numbers
@@ -164,7 +165,10 @@ def transform_trial_balances(input_path: Path, output_path: Path) -> None:
     # Step 6: Remove helper columns not needed downstream
     final_df = combined_df.drop(columns=["Code0", "Code1"])
 
-    # Step 7: Set proper types
+    # Step 7: Pad CodeGrootboekrekening to 4 digits with leading zeros
+    final_df["CodeGrootboekrekening"] = pad_account_code(final_df["CodeGrootboekrekening"])
+
+    # Step 8: Set proper types
     final_df["Value"] = pd.to_numeric(final_df["Value"], errors="coerce")
     final_df["DisplayValue"] = pd.to_numeric(final_df["DisplayValue"], errors="coerce")
 
@@ -191,8 +195,21 @@ def transform_trial_balances(input_path: Path, output_path: Path) -> None:
     print("\nDone!")
 
 
-if __name__ == "__main__":
-    input_file = Path("import/2025_BalansenWinstverliesperperiode.xlsx")
-    output_file = Path("export/trial_balances.duckdb")
+def main() -> int:
+    """CLI entry point."""
+    import sys
 
-    transform_trial_balances(input_file, output_file)
+    try:
+        input_file = Path("import/2025_BalansenWinstverliesperperiode.xlsx")
+        output_file = Path("export/trial_balances.duckdb")
+        transform_trial_balances(input_file, output_file)
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

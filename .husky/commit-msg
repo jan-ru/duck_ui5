@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Optional: Validate commit message format
+# Ensures commits follow conventional commits format
+# Examples: feat:, fix:, docs:, chore:, test:, refactor:
+
+# Uncomment to enforce conventional commits:
+# commit_msg=$(cat "$1")
+# if ! echo "$commit_msg" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .{1,}"; then
+#   echo "❌ Invalid commit message format!"
+#   echo "Expected format: <type>(<scope>): <subject>"
+#   echo "Example: feat(scripts): add account code padding utility"
+#   echo ""
+#   echo "Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert"
+#   exit 1
+# fi

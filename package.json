@@ -1,9 +1,13 @@
 {
   "name": "duck_ui5",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "DuckDB-WASM Viewer - Excel to DuckDB converter with interactive web viewer",
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "lint:python": "ruff check scripts/ tests/",
+    "format:python": "ruff format scripts/ tests/ && ruff check --fix scripts/ tests/",
+    "test:python": "pytest tests/ -v",
+    "check:python": "ruff check scripts/ tests/ && pytest tests/"
   },
   "keywords": [
     "duckdb",
@@ -14,6 +18,13 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.0"
+  },
+  "lint-staged": {
+    "*.py": [
+      "ruff check --fix",
+      "ruff format"
+    ]
   }
 }

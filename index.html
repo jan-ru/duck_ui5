@@ -7,43 +7,77 @@
 </head>
 <body>
   <h1>DuckDB-WASM Viewer</h1>
-  <input type="file" id="file" accept=".db">
-  <div>
-    <select id="codeFilter" disabled>
-      <option value="">Select Code...</option>
-    </select>
-    <select id="periodeFilter" disabled>
-      <option value="">Select Periode...</option>
-    </select>
-    <select id="code1Filter" disabled>
-      <option value="">Select Code1...</option>
-    </select>
-    <button id="showAll" disabled>Show All</button>
-    <button id="rollupAccounts" disabled>Rollup Accounts</button>
+
+  <nav>
+    <a href="#viewer" class="nav-link active">Data Viewer</a>
+    <a href="#schema" class="nav-link">Schema</a>
+  </nav>
+
+  <!-- Data Viewer Page -->
+  <div id="viewer-page" class="page active">
+    <input type="file" id="file" accept=".db,.duckdb">
+    <div id="table-selector-container" style="display: none; margin: 10px 0;">
+      <label for="tableSelector">Select Table:</label>
+      <select id="tableSelector">
+        <option value="">Loading tables...</option>
+      </select>
+    </div>
+    <div id="filter-container"></div>
+    <div id="button-container"></div>
+    <div id="loading" style="display: none;">Loading...</div>
+    <div id="error" style="display: none; color: red;"></div>
+    <div id="out"></div>
   </div>
-  <div id="loading" style="display: none;">Loading...</div>
-  <div id="error" style="display: none; color: red;"></div>
-  <div id="out"></div>
+
+  <!-- Schema Page -->
+  <div id="schema-page" class="page">
+    <h2>Database Schema</h2>
+    <div id="schema-loading" style="display: none;">Loading schema...</div>
+    <div id="schema-error" style="display: none; color: red;"></div>
+    <div id="schema-diagram"></div>
+  </div>
 
   <script type="module">
     import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm";
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 
     // DOM elements
     const input = document.getElementById("file");
     const out = document.getElementById("out");
     const loading = document.getElementById("loading");
     const errorDiv = document.getElementById("error");
-    const codeFilter = document.getElementById("codeFilter");
-    const periodeFilter = document.getElementById("periodeFilter");
-    const code1Filter = document.getElementById("code1Filter");
-    const showAllBtn = document.getElementById("showAll");
-    const rollupAccountsBtn = document.getElementById("rollupAccounts");
 
     // Constants
     const DB_FILE = 'data.db';
-    const TABLE_NAME = 'uploaded_db.transactions';
 
-    let conn = null;
+    // Global state management
+    const viewerState = {
+      conn: null,
+      currentTable: null,
+      tables: [],
+      currentFilters: {},
+      columnMetadata: {},
+      columnFormatters: {}
+    };
+
+    // Table-specific configuration
+    const TABLE_CONFIG = {
+      'transactions': {
+        filters: ['Code', 'Periode', 'Code1'],
+        rollupOptions: [
+          { label: 'Rollup Accounts', groupBy: ['CodeGrootboekrekening', 'NaamGrootboekrekening'], aggregateColumn: 'Saldo' },
+          { label: 'Rollup by Code', groupBy: ['Code'], aggregateColumn: 'Saldo' },
+          { label: 'Rollup by Periode', groupBy: ['Periode'], aggregateColumn: 'Saldo' }
+        ]
+      },
+      'fct_TrialBalances': {
+        filters: 'auto',
+        rollupOptions: [
+          { label: 'Rollup by Account', groupBy: ['CodeGrootboekrekening', 'JaarPeriode'], aggregateColumn: 'DisplayValue' },
+          { label: 'Rollup by Period', groupBy: ['JaarPeriode'], aggregateColumn: 'DisplayValue' }
+        ]
+      }
+    };
 
     // Show/hide loading indicator
     function setLoading(isLoading) {
@@ -82,21 +116,11 @@
       });
     }
 
-    // Format cell value based on column name
-    function formatCell(header, value) {
-      if (header === 'Boekdatum') {
-        return formatDate(value);
-      } else if (header === 'Saldo') {
-        return formatNumber(value);
-      }
-      return value;
-    }
-
     // Populate dropdown with unique values
-    async function populateDropdown(dropdown, columnName, defaultText) {
+    async function populateDropdown(dropdown, columnName, defaultText, tableName) {
       try {
-        const query = `SELECT DISTINCT ${columnName} FROM ${TABLE_NAME} ORDER BY ${columnName}`;
-        const result = await conn.query(query);
+        const query = `SELECT DISTINCT ${columnName} FROM ${tableName} ORDER BY ${columnName}`;
+        const result = await viewerState.conn.query(query);
         const rows = result.toArray();
 
         dropdown.innerHTML = `<option value="">${defaultText}</option>`;
@@ -115,15 +139,22 @@
     function renderTable(rows) {
       if (!rows.length) return "<p>No data</p>";
       const headers = Object.keys(rows[0]);
+      const formatters = viewerState.columnFormatters[viewerState.currentTable] || {};
+      const rowCount = `<div class="row-count">Showing ${rows.length.toLocaleString()} row${rows.length !== 1 ? 's' : ''}</div>`;
+
       return `
+        ${rowCount}
         <table>
           <thead>
             <tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr>
           </thead>
           <tbody>
             ${rows.map(r => `<tr>${headers.map(h => {
-              const value = formatCell(h, r[h]);
-              const align = h === 'Saldo' ? ' style="text-align: right;"' : '';
+              const formatter = formatters[h] || ((v) => v);
+              const value = formatter(r[h]);
+              const columnMeta = viewerState.columnMetadata[viewerState.currentTable]?.find(c => c.column_name === h);
+              const isNumeric = columnMeta && ['DOUBLE', 'DECIMAL', 'FLOAT', 'INTEGER', 'BIGINT'].includes(columnMeta.data_type.toUpperCase().split('(')[0]);
+              const align = isNumeric ? ' style="text-align: right;"' : '';
               return `<td${align}>${value}</td>`;
             }).join("")}</tr>`).join("")}
           </tbody>
@@ -134,7 +165,7 @@
     async function loadAndDisplayData(query) {
       try {
         setLoading(true);
-        const result = await conn.query(query);
+        const result = await viewerState.conn.query(query);
         const rows = result.toArray();
         out.innerHTML = renderTable(rows);
       } catch (error) {
@@ -143,6 +174,209 @@
         setLoading(false);
       }
     }
+
+    // Select default table (prefer transactions from main, or single table if only one)
+    function selectDefaultTable(tables) {
+      // Prefer transactions table from main schema
+      const transactionsTable = tables.find(t => t.name === 'transactions' && t.schema === 'main');
+      if (transactionsTable) return transactionsTable;
+
+      // Fallback to any transactions table
+      const anyTransactionsTable = tables.find(t => t.name === 'transactions');
+      if (anyTransactionsTable) return anyTransactionsTable;
+
+      // If only one table, select it
+      if (tables.length === 1) return tables[0];
+
+      return null;
+    }
+
+    // Populate table selector dropdown
+    async function populateTableSelector() {
+      try {
+        const tableSelector = document.getElementById('tableSelector');
+        const tables = await querySchemaMetadata();
+
+        console.log('Tables found:', tables);
+
+        viewerState.tables = tables;
+
+        if (tables.length === 0) {
+          showError('No tables found in the uploaded database');
+          return;
+        }
+
+        tableSelector.innerHTML = '<option value="">Select Table...</option>';
+        tables.forEach(table => {
+          const option = document.createElement('option');
+          const fullTableName = `${table.schema}.${table.name}`;
+          option.value = fullTableName;
+          option.textContent = `${table.name} (${Number(table.rowCount).toLocaleString()} rows)`;
+          tableSelector.appendChild(option);
+        });
+
+        document.getElementById('table-selector-container').style.display = 'block';
+
+        // Auto-select default table
+        const defaultTable = selectDefaultTable(tables);
+        if (defaultTable) {
+          tableSelector.value = `${defaultTable.schema}.${defaultTable.name}`;
+          await onTableSelected(`${defaultTable.schema}.${defaultTable.name}`);
+        }
+      } catch (error) {
+        console.error('Error in populateTableSelector:', error);
+        showError(`Failed to populate table selector: ${error.message}`);
+      }
+    }
+
+    // Detect filterable columns for a table
+    async function detectFilterableColumns(tableName) {
+      const tableNameOnly = tableName.split('.')[1];
+      const config = TABLE_CONFIG[tableNameOnly];
+
+      if (config && config.filters && config.filters !== 'auto') {
+        return config.filters.map(colName => ({ name: colName }));
+      }
+
+      // Auto-detect filterable columns
+      const schema = tableName.split('.')[0];
+      const columnsQuery = `
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = '${schema}' AND table_name = '${tableNameOnly}'
+      `;
+      const result = await viewerState.conn.query(columnsQuery);
+      const columns = result.toArray();
+
+      const filterable = [];
+      for (const col of columns) {
+        const dataType = col.data_type.toUpperCase();
+        if (!['VARCHAR', 'TEXT'].includes(dataType.split('(')[0])) continue;
+
+        const countQuery = `SELECT COUNT(DISTINCT ${col.column_name}) as cnt FROM ${tableName}`;
+        const countResult = await viewerState.conn.query(countQuery);
+        const distinctCount = countResult.toArray()[0].cnt;
+
+        if (distinctCount >= 2 && distinctCount <= 100) {
+          filterable.push({ name: col.column_name });
+        }
+      }
+
+      return filterable;
+    }
+
+    // Generate filter UI dynamically
+    async function generateFilterUI(filterColumns, tableName) {
+      const container = document.getElementById('filter-container');
+      container.innerHTML = '';
+      viewerState.currentFilters = {};
+
+      for (const filterCol of filterColumns) {
+        const select = document.createElement('select');
+        select.id = `filter_${filterCol.name}`;
+
+        await populateDropdown(select, filterCol.name, `Select ${filterCol.name}...`, tableName);
+
+        select.onchange = applyFilters;
+        container.appendChild(select);
+        viewerState.currentFilters[filterCol.name] = select;
+      }
+    }
+
+    // Generate buttons dynamically
+    async function generateButtons(tableName, columns) {
+      const container = document.getElementById('button-container');
+      container.innerHTML = '';
+
+      // Always add Show All button
+      const showAllBtn = document.createElement('button');
+      showAllBtn.textContent = 'Show All';
+      showAllBtn.onclick = async () => {
+        Object.values(viewerState.currentFilters).forEach(f => f.value = '');
+        await loadAndDisplayData(`SELECT * FROM ${tableName}`);
+      };
+      container.appendChild(showAllBtn);
+
+      // Add rollup buttons
+      const tableNameOnly = tableName.split('.')[1];
+      const config = TABLE_CONFIG[tableNameOnly];
+
+      if (config && config.rollupOptions) {
+        config.rollupOptions.forEach(btnConfig => {
+          const btn = document.createElement('button');
+          btn.textContent = btnConfig.label;
+          btn.onclick = () => performRollup(tableName, btnConfig.groupBy, btnConfig.aggregateColumn);
+          container.appendChild(btn);
+        });
+      }
+    }
+
+    // Build column formatters based on data types
+    function buildColumnFormatters(columns) {
+      const formatters = {};
+      const FORMAT_RULES = {
+        'DATE': formatDate,
+        'TIMESTAMP': formatDate,
+        'DOUBLE': formatNumber,
+        'DECIMAL': formatNumber,
+        'FLOAT': formatNumber,
+        'INTEGER': (v) => v?.toLocaleString() || '',
+        'BIGINT': (v) => v?.toLocaleString() || ''
+      };
+
+      columns.forEach(col => {
+        const baseType = col.data_type.toUpperCase().split('(')[0];
+        formatters[col.column_name] = FORMAT_RULES[baseType] || ((v) => v);
+      });
+
+      return formatters;
+    }
+
+    // Main handler when table is selected
+    async function onTableSelected(tableName) {
+      try {
+        setLoading(true);
+        viewerState.currentTable = tableName;
+
+        // Get column metadata
+        const schema = tableName.split('.')[0];
+        const tableNameOnly = tableName.split('.')[1];
+        const columnsQuery = `
+          SELECT column_name, data_type, is_nullable
+          FROM information_schema.columns
+          WHERE table_schema = '${schema}' AND table_name = '${tableNameOnly}'
+          ORDER BY ordinal_position
+        `;
+        const result = await viewerState.conn.query(columnsQuery);
+        const columns = result.toArray();
+        viewerState.columnMetadata[tableName] = columns;
+
+        // Build formatters
+        viewerState.columnFormatters[tableName] = buildColumnFormatters(columns);
+
+        // Generate filters
+        const filterableColumns = await detectFilterableColumns(tableName);
+        await generateFilterUI(filterableColumns, tableName);
+
+        // Generate buttons
+        await generateButtons(tableName, columns);
+
+        // Load initial data
+        await loadAndDisplayData(`SELECT * FROM ${tableName}`);
+
+      } catch (error) {
+        showError(`Failed to load table: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Table selector event handler
+    document.getElementById('tableSelector').onchange = async (e) => {
+      if (e.target.value) {
+        await onTableSelected(e.target.value);
+      }
+    };
 
     input.onchange = async () => {
       const file = input.files[0];
@@ -160,34 +394,25 @@
 
         const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
         await db.instantiate(bundle.mainModule);
-        conn = await db.connect();
 
         // Register the uploaded DuckDB file
         await db.registerFileHandle(
           DB_FILE,
           file,
-          duckdb.DuckDBDataProtocol.BROWSER_FILEREADER
+          duckdb.DuckDBDataProtocol.BROWSER_FILEREADER,
+          true  // force: true to replace if exists
         );
 
-        // Attach the database
-        await conn.query(`ATTACH '${DB_FILE}' AS uploaded_db`);
+        // Open the database file
+        await db.open({
+          path: DB_FILE
+        });
 
-        // Query and display all data
-        await loadAndDisplayData(`SELECT * FROM ${TABLE_NAME}`);
+        // Connect to the opened database
+        viewerState.conn = await db.connect();
 
-        // Populate all dropdowns using the helper function
-        await Promise.all([
-          populateDropdown(codeFilter, 'Code', 'Select Code...'),
-          populateDropdown(periodeFilter, 'Periode', 'Select Periode...'),
-          populateDropdown(code1Filter, 'Code1', 'Select Code1...')
-        ]);
-
-        // Enable filters
-        codeFilter.disabled = false;
-        periodeFilter.disabled = false;
-        code1Filter.disabled = false;
-        showAllBtn.disabled = false;
-        rollupAccountsBtn.disabled = false;
+        // Populate table selector instead of immediate data load
+        await populateTableSelector();
       } catch (error) {
         showError(`Failed to load file: ${error.message}`);
       } finally {
@@ -198,52 +423,263 @@
     // Build WHERE clause based on active filters with SQL escaping
     function buildWhereClause() {
       const conditions = [];
-      if (codeFilter.value) {
-        conditions.push(`Code = '${escapeSql(codeFilter.value)}'`);
-      }
-      if (periodeFilter.value) {
-        conditions.push(`Periode = '${escapeSql(periodeFilter.value)}'`);
-      }
-      if (code1Filter.value) {
-        conditions.push(`Code1 = '${escapeSql(code1Filter.value)}'`);
-      }
+      Object.entries(viewerState.currentFilters).forEach(([colName, filterElement]) => {
+        if (filterElement.value) {
+          conditions.push(`${colName} = '${escapeSql(filterElement.value)}'`);
+        }
+      });
       return conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
     }
 
     // Apply filters and reload data
     async function applyFilters() {
       const whereClause = buildWhereClause();
-      await loadAndDisplayData(`SELECT * FROM ${TABLE_NAME}${whereClause}`);
+      await loadAndDisplayData(`SELECT * FROM ${viewerState.currentTable}${whereClause}`);
     }
 
-    // Perform rollup on accounts
-    async function rollupAccounts() {
+    // Generic rollup function
+    async function performRollup(tableName, groupByColumns, aggregateColumn) {
       const whereClause = buildWhereClause();
       const query = `
         SELECT
-          CodeGrootboekrekening,
-          NaamGrootboekrekening,
-          SUM(Saldo) as Saldo
-        FROM ${TABLE_NAME}${whereClause}
-        GROUP BY CodeGrootboekrekening, NaamGrootboekrekening
-        ORDER BY CodeGrootboekrekening
+          ${groupByColumns.join(', ')},
+          SUM(${aggregateColumn}) as ${aggregateColumn}
+        FROM ${tableName}${whereClause}
+        GROUP BY ${groupByColumns.join(', ')}
+        ORDER BY ${groupByColumns[0]}
       `;
       await loadAndDisplayData(query);
     }
 
-    // Event handlers for filters
-    codeFilter.onchange = applyFilters;
-    periodeFilter.onchange = applyFilters;
-    code1Filter.onchange = applyFilters;
+    // ========================================
+    // Navigation and Schema Visualization
+    // ========================================
 
-    showAllBtn.onclick = async () => {
-      codeFilter.value = "";
-      periodeFilter.value = "";
-      code1Filter.value = "";
-      await loadAndDisplayData(`SELECT * FROM ${TABLE_NAME}`);
-    };
+    // Initialize Mermaid
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
 
-    rollupAccountsBtn.onclick = rollupAccounts;
+    // Navigation handling
+    function handleNavigation() {
+      const page = window.location.hash.slice(1) || 'viewer';
+      showPage(page);
+    }
+
+    function showPage(pageName) {
+      // Update page visibility
+      const pages = document.querySelectorAll('.page');
+      pages.forEach(page => page.classList.remove('active'));
+
+      const activePageId = pageName === 'schema' ? 'schema-page' : 'viewer-page';
+      document.getElementById(activePageId).classList.add('active');
+
+      // Update navigation links
+      const navLinks = document.querySelectorAll('.nav-link');
+      navLinks.forEach(link => {
+        link.classList.remove('active');
+        const href = link.getAttribute('href');
+        if (href === `#${pageName}`) {
+          link.classList.add('active');
+        }
+      });
+
+      // Load schema if navigating to schema page and database is loaded
+      if (pageName === 'schema' && viewerState.conn) {
+        loadSchema();
+      }
+    }
+
+    // Query schema metadata from database
+    async function querySchemaMetadata() {
+      const tables = [];
+
+      try {
+        // First, let's see ALL available schemas and tables for debugging
+        const allTablesQuery = `
+          SELECT table_name, table_schema
+          FROM information_schema.tables
+          ORDER BY table_schema, table_name
+        `;
+        const allTablesResult = await viewerState.conn.query(allTablesQuery);
+        const allTableRows = allTablesResult.toArray();
+        console.log('All tables in all schemas:', allTableRows);
+        // Log the actual schema names more clearly
+        allTableRows.forEach(row => {
+          console.log(`  - ${row.table_schema}.${row.table_name}`);
+        });
+
+        // Get all tables from main schema (where uploaded tables end up)
+        const tablesQuery = `
+          SELECT table_name, table_schema
+          FROM information_schema.tables
+          WHERE table_schema = 'main'
+            AND table_name NOT LIKE 'sqlite_%'
+            AND table_name NOT IN ('geometry_columns', 'spatial_ref_sys')
+          ORDER BY table_name
+        `;
+        const tablesResult = await viewerState.conn.query(tablesQuery);
+        const tableRows = tablesResult.toArray();
+        console.log('Tables in main schema:', tableRows);
+
+        // For each table, get columns and row count
+        for (const tableRow of tableRows) {
+          const tableName = tableRow.table_name;
+          const tableSchema = tableRow.table_schema;
+          const fullTableName = `${tableSchema}.${tableName}`;
+
+          // Get columns
+          const columnsQuery = `
+            SELECT
+              column_name,
+              data_type,
+              is_nullable,
+              ordinal_position
+            FROM information_schema.columns
+            WHERE table_schema = '${tableSchema}' AND table_name = '${tableName}'
+            ORDER BY ordinal_position
+          `;
+          const columnsResult = await viewerState.conn.query(columnsQuery);
+          const columns = columnsResult.toArray().map(col => ({
+            name: col.column_name,
+            type: col.data_type,
+            nullable: col.is_nullable === 'YES'
+          }));
+
+          // Get row count
+          let rowCount = 0;
+          try {
+            const countQuery = `SELECT COUNT(*) as count FROM ${fullTableName}`;
+            const countResult = await viewerState.conn.query(countQuery);
+            const countRow = countResult.toArray()[0];
+            rowCount = countRow.count;
+          } catch (e) {
+            console.warn(`Could not get row count for ${fullTableName}:`, e);
+          }
+
+          tables.push({
+            name: tableName,
+            schema: tableSchema,
+            columns,
+            rowCount
+          });
+        }
+
+        return tables;
+      } catch (error) {
+        console.error('Error querying schema metadata:', error);
+        throw error;
+      }
+    }
+
+    // Detect relationships between tables based on matching column names
+    function detectRelationships(tables) {
+      const relationships = [];
+      const seenRelationships = new Set();
+
+      for (let i = 0; i < tables.length; i++) {
+        for (let j = i + 1; j < tables.length; j++) {
+          const table1 = tables[i];
+          const table2 = tables[j];
+
+          // Find matching column names
+          const matches = table1.columns.filter(col1 =>
+            table2.columns.some(col2 => col2.name === col1.name)
+          );
+
+          matches.forEach(match => {
+            // Create unique key for relationship to avoid duplicates
+            const relKey = `${table1.name}-${table2.name}-${match.name}`;
+            if (!seenRelationships.has(relKey)) {
+              relationships.push({
+                from: table1.name,
+                to: table2.name,
+                column: match.name,
+                type: 'inferred'
+              });
+              seenRelationships.add(relKey);
+            }
+          });
+        }
+      }
+
+      return relationships;
+    }
+
+    // Generate Mermaid ER diagram code
+    function generateMermaidERD(tables, relationships) {
+      let mermaid = 'erDiagram\n';
+
+      // Generate table definitions
+      tables.forEach(table => {
+        mermaid += `    ${table.name} {\n`;
+        table.columns.forEach(col => {
+          mermaid += `        ${col.type} ${col.name}\n`;
+        });
+        mermaid += `    }\n\n`;
+      });
+
+      // Generate relationships
+      relationships.forEach(rel => {
+        mermaid += `    ${rel.from} ||--o{ ${rel.to} : ${rel.column}\n`;
+      });
+
+      return mermaid;
+    }
+
+    // Load and display schema
+    async function loadSchema() {
+      const schemaLoading = document.getElementById('schema-loading');
+      const schemaError = document.getElementById('schema-error');
+      const schemaDiagram = document.getElementById('schema-diagram');
+
+      try {
+        // Show loading
+        schemaLoading.style.display = 'block';
+        schemaError.style.display = 'none';
+        schemaDiagram.innerHTML = '';
+
+        // Query schema
+        const tables = await querySchemaMetadata();
+
+        if (tables.length === 0) {
+          schemaDiagram.innerHTML = '<p>No tables found in database.</p>';
+          return;
+        }
+
+        // Detect relationships
+        const relationships = detectRelationships(tables);
+
+        // Generate Mermaid code
+        const mermaidCode = generateMermaidERD(tables, relationships);
+
+        // Render Mermaid diagram
+        const { svg } = await mermaid.render('schema-diagram-svg', mermaidCode);
+        schemaDiagram.innerHTML = svg;
+
+        // Add table statistics
+        const statsDiv = document.createElement('div');
+        statsDiv.className = 'row-count';
+        statsDiv.style.marginTop = '20px';
+        const totalRows = tables.reduce((sum, t) => sum + Number(t.rowCount), 0);
+        statsDiv.innerHTML = `
+          <strong>Database Statistics:</strong><br>
+          Tables: ${tables.length} |
+          Total Rows: ${totalRows.toLocaleString()} |
+          Relationships: ${relationships.length}
+        `;
+        schemaDiagram.appendChild(statsDiv);
+
+      } catch (error) {
+        console.error('Error loading schema:', error);
+        schemaError.textContent = `Error: ${error.message}`;
+        schemaError.style.display = 'block';
+      } finally {
+        schemaLoading.style.display = 'none';
+      }
+    }
+
+    // Initialize navigation
+    window.addEventListener('hashchange', handleNavigation);
+    window.addEventListener('load', handleNavigation);
   </script>
 </body>
 </html>

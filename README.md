@@ -1,5 +1,13 @@
 # DuckDB-WASM Viewer
 
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-0.0.3-brightgreen.svg)
+![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
+![DuckDB](https://img.shields.io/badge/DuckDB-WASM-orange.svg)
+![Pandas](https://img.shields.io/badge/pandas-3.0+-150458.svg?logo=pandas&logoColor=white)
+![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0.svg?logo=webassembly&logoColor=white)
+![Mermaid](https://img.shields.io/badge/Mermaid-ER_Diagrams-FF3670.svg?logo=mermaid&logoColor=white)
+
 A web-based data viewer that converts Excel files to DuckDB format and provides interactive filtering and visualization using DuckDB-WASM.
 
 ## Overview
@@ -11,7 +19,7 @@ This project provides a simple workflow for:
 
 ```mermaid
 graph LR
-    A[Excel File<br/>import/DUMP_13jun25.xls] --> B[Python Script<br/>process_dump.py]
+    A[Excel File<br/>import/DUMP_13jun25.xls] --> B[Python Script<br/>scripts/process_dump.py]
     B --> C{Data Transformations}
     C --> D[Remove Columns]
     C --> E[Convert Dates]
@@ -40,7 +48,10 @@ graph LR
 - **Web Viewer**: Browser-based interface with:
   - Drag-and-drop DuckDB database file loading
   - Three filter dropdowns (Code, Periode, Code1) that work together
-  - Account rollup feature - aggregate transactions by account with total balances
+  - Multiple rollup features:
+    - Rollup Accounts - aggregate by account with total balances
+    - Rollup by Code - aggregate by transaction code
+    - Rollup by Periode - aggregate by period
   - Formatted display (dates as dd/mm/yyyy, numbers with thousand separators)
   - Right-aligned currency values
   - Small table font (10px) for dense data viewing
@@ -83,7 +94,7 @@ import/DUMP_13jun25.xls
 
 2. Run the conversion script:
 ```bash
-python process_dump.py
+python scripts/process_dump.py
 ```
 
 This will:
@@ -97,16 +108,26 @@ This will:
 
 1. Open `index.html` in a web browser
 
-2. Click "Choose File" and select the DuckDB database file from the `export/` directory
+2. Click "Choose File" and select a DuckDB database file from the `export/` directory:
+   - `2023_transactions.db` - Transaction data only
+   - `trial_balances.duckdb` - Trial balance data only
+   - `combined.db` - Both datasets in one file (recommended for schema analysis)
 
-3. Use the filter dropdowns to explore the data:
+3. Use the filter dropdowns and rollup buttons to explore the data:
    - **Select Code**: Filter by transaction code
    - **Select Periode**: Filter by period
    - **Select Code1**: Filter by Code1 value
    - **Show All**: Clear all filters and show all records
    - **Rollup Accounts**: Aggregate transactions by account, showing totals per account
+   - **Rollup by Code**: Aggregate transactions by Code, showing totals per code
+   - **Rollup by Periode**: Aggregate transactions by Periode, showing totals per period
 
-Filters can be combined - selecting multiple filters will show only records that match all criteria (AND logic). The Rollup Accounts feature respects active filters, allowing you to see account totals for filtered data.
+4. Click the **Schema** tab to view an entity-relationship diagram showing:
+   - All tables in the database with their columns and data types
+   - Relationships between tables (detected by matching column names)
+   - Database statistics (table count, row count, relationships)
+
+Filters can be combined - selecting multiple filters will show only records that match all criteria (AND logic). All rollup features respect active filters, allowing you to see aggregated totals for filtered data.
 
 ## Project Structure
 
@@ -114,8 +135,12 @@ Filters can be combined - selecting multiple filters will show only records that
 duck_ui5/
 ├── index.html              # Main web viewer interface
 ├── styles.css              # Styling for the web interface
-├── process_dump.py         # Python data transformation script
-├── transform_trial_balances.py # Trial balance transformation script
+├── scripts/                # Python transformation scripts
+│   ├── utils.py            # Shared utility functions
+│   ├── process_dump.py     # Transaction data transformation
+│   ├── transform_trial_balances.py # Trial balance transformation
+│   ├── combine_databases.py # Combine multiple databases
+│   └── main.py             # Entry point (if needed)
 ├── fac_TrialBalances.m     # Reference Power Query logic
 ├── package.json           # Node.js package configuration
 ├── LICENSE.md             # MIT License
@@ -128,12 +153,12 @@ duck_ui5/
 
 ## Trial Balance Transformation
 
-Transform Excel trial balance exports to DuckDB using `transform_trial_balances.py`.
+Transform Excel trial balance exports to DuckDB using `scripts/transform_trial_balances.py`.
 
 ### Usage
 
 ```bash
-uv run python transform_trial_balances.py
+uv run python scripts/transform_trial_balances.py
 ```
 
 ### Input
@@ -158,10 +183,58 @@ The script replicates the Power Query logic from `fac_TrialBalances.m`:
    - Gross Margin (500-510): negative
    - Expenses (520-550): negative
 4. **Generate profit rows** (synthetic account 9999) per period
+5. **Pad CodeGrootboekrekening** to 4 digits with leading zeros (using shared utility)
+
+## Combining Databases
+
+Combine multiple DuckDB databases into a single file using `scripts/combine_databases.py`.
+
+### Usage
+
+```bash
+python scripts/combine_databases.py
+```
+
+### What It Does
+
+Merges the following databases into `export/combined.db`:
+- `export/2023_transactions.db` → `transactions` table
+- `export/trial_balances.duckdb` → `fct_TrialBalances` table
+
+This allows you to:
+- Load both datasets in the web viewer simultaneously
+- Query across both tables using SQL joins
+- View the complete schema in the Schema page showing both tables and their relationships
+
+### When to Use
+
+Combine databases when you need to:
+- Analyze transactions alongside trial balances
+- View the full data model in one place
+- Simplify file management (one file instead of multiple)
+
+## Shared Utilities
+
+The `scripts/utils.py` module contains shared functions used across multiple transformation scripts:
+
+### `pad_account_code(code_series)`
+
+Pads CodeGrootboekrekening (account codes) to 4 digits with leading zeros.
+
+**Padding rules:**
+- 2 characters → pad with 2 zeros (e.g., "10" → "0010")
+- 3 characters → pad with 1 zero (e.g., "100" → "0100")
+- 4 characters → no change (e.g., "1000" → "1000")
+
+**Used by:**
+- `process_dump.py` - Pads transaction account codes
+- `transform_trial_balances.py` - Pads trial balance account codes
+
+This ensures consistent account code formatting across all datasets.
 
 ## Data Transformations
 
-The `process_dump.py` script performs the following transformations:
+The `scripts/process_dump.py` script performs the following transformations:
 
 | Column | Transformation |
 |--------|---------------|

@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run lint-staged on Python files
+npx lint-staged
+
+# Optional: Run Python tests if any Python files were changed
+# PYTHON_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+# if [ -n "$PYTHON_FILES" ]; then
+#   echo "Running Python tests..."
+#   pytest tests/ -v || exit 1
+# fi
