@@ -11,10 +11,9 @@ Transforms Excel transaction data by:
 import sys
 from pathlib import Path
 
-import duckdb
 import pandas as pd
 
-from utils import pad_account_code
+from utils import pad_account_code, apply_schema, validate_schema, write_to_duckdb
 
 # Column names to remove from the dump
 COLUMNS_TO_DROP = [
@@ -42,45 +41,6 @@ TRANSACTIONS_SCHEMA = {
     "Saldo": "float64",
     "Factuurnummer": "str",
 }
-
-
-def apply_schema(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
-    """
-    Apply explicit data types to DataFrame.
-
-    Args:
-        df: DataFrame to type
-        schema: Dict mapping column names to dtypes
-
-    Returns:
-        DataFrame with corrected types
-    """
-    df_typed = df.copy()
-
-    for col, dtype in schema.items():
-        if col in df_typed.columns:
-            try:
-                if dtype == "datetime64[ns]":
-                    # Handle dates specially
-                    df_typed[col] = pd.to_datetime(df_typed[col], errors="coerce")
-                elif dtype in ["float64", "Float64"]:
-                    # Handle numeric with coercion
-                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce")
-                elif dtype in ["Int64", "int64"]:
-                    # Nullable integer for codes
-                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce").astype("Int64")
-                elif dtype == "str":
-                    # Force string type
-                    df_typed[col] = df_typed[col].astype("str")
-                else:
-                    # Other types
-                    df_typed[col] = df_typed[col].astype(dtype)
-            except Exception as e:
-                print(f"Warning: Could not convert {col} to {dtype}: {e}")
-        else:
-            print(f"Warning: Column {col} not found in DataFrame")
-
-    return df_typed
 
 
 def process_dump(
@@ -117,16 +77,15 @@ def process_dump(
     print(f"  Final schema:")
     print(df.dtypes)
 
-    # Ensure output directory exists
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    # Validate schema before writing
+    if not validate_schema(df, TRANSACTIONS_SCHEMA):
+        print("  Warning: Schema validation found issues, but continuing...")
 
-    # Write to DuckDB
-    con = duckdb.connect(output_path)
-    con.execute("CREATE OR REPLACE TABLE transactions AS SELECT * FROM df")
-    con.close()
+    # Write to DuckDB using shared utility
+    row_count = write_to_duckdb(df, output_path, "transactions", if_exists="replace")
 
     print(f"  ✓ Written to: {output_path}")
-    print(f"  ✓ Final: {len(df):,} rows, {len(df.columns)} columns")
+    print(f"  ✓ Verified: {row_count:,} rows in transactions table")
 
 
 def main() -> int:

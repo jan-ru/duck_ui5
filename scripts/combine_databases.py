@@ -16,12 +16,45 @@ def combine_databases(
     output_db: str = "export/combined.db",
 ) -> None:
     """
-    Combine multiple DuckDB databases into a single file.
+    Combine multiple DuckDB databases into a single unified database.
+
+    Creates a new database containing all tables from source databases.
+    Uses DuckDB's ATTACH mechanism to efficiently copy tables without
+    loading data into memory.
+
+    Process:
+    1. Create new combined database
+    2. ATTACH source databases
+    3. Copy tables using CREATE TABLE AS SELECT
+    4. DETACH source databases
+    5. Verify row counts
 
     Args:
-        transactions_db: Path to transactions database
-        trial_balances_db: Path to trial balances database
-        output_db: Path to combined output database
+        transactions_db: Path to database containing 'transactions' table.
+            Default: "export/2023_transactions.db"
+        trial_balances_db: Path to database containing 'fct_TrialBalances' table.
+            Default: "export/trial_balances.duckdb"
+        output_db: Path to create combined output database.
+            Default: "export/combined.db"
+            Will be overwritten if it exists.
+
+    Raises:
+        FileNotFoundError: If source databases don't exist.
+        Exception: If table copying fails.
+
+    Example:
+        >>> combine_databases()
+        Combining databases into export/combined.db...
+          Copying transactions table...
+            ✓ Copied 7,388 rows
+          Copying fct_TrialBalances table...
+            ✓ Copied 1,775 rows
+        ✓ Combined database created: export/combined.db
+          Tables: 2
+          Total rows: 9,163
+
+    Note:
+        Source databases are not modified. A new database is created.
     """
     print(f"Combining databases into {output_db}...")
 

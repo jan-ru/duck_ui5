@@ -4,11 +4,10 @@ Replicates the Power Query logic from fac_TrialBalances.m
 """
 
 import pandas as pd
-import duckdb
 from pathlib import Path
 from datetime import date
 import calendar
-from utils import pad_account_code
+from utils import pad_account_code, apply_schema, validate_schema, write_to_duckdb
 
 
 # Mapping Dutch month names to month numbers
@@ -32,49 +31,29 @@ TRIAL_BALANCES_SCHEMA = {
 }
 
 
-def apply_schema(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
-    """
-    Apply explicit data types to DataFrame.
-
-    Args:
-        df: DataFrame to type
-        schema: Dict mapping column names to dtypes
-
-    Returns:
-        DataFrame with corrected types
-    """
-    df_typed = df.copy()
-
-    for col, dtype in schema.items():
-        if col in df_typed.columns:
-            try:
-                if dtype == "datetime64[ns]":
-                    # Handle dates specially
-                    df_typed[col] = pd.to_datetime(df_typed[col], errors="coerce")
-                elif dtype in ["float64", "Float64"]:
-                    # Handle numeric with coercion
-                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce")
-                elif dtype in ["Int64", "int64"]:
-                    # Nullable integer for codes
-                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce").astype("Int64")
-                elif dtype == "str":
-                    # Force string type (handles all-NULL columns)
-                    df_typed[col] = df_typed[col].astype("str")
-                else:
-                    # Other types
-                    df_typed[col] = df_typed[col].astype(dtype)
-            except Exception as e:
-                print(f"Warning: Could not convert {col} to {dtype}: {e}")
-        else:
-            print(f"Warning: Column {col} not found in DataFrame")
-
-    return df_typed
-
-
 def parse_period_column(col_name: str) -> tuple[str, date] | None:
     """
-    Parse column name like 'januari2025' or 'Openingsbalans2025' to (JaarPeriode, LastDate).
-    Returns None for non-period columns.
+    Parse period column name to extract year-month and last date.
+
+    Handles two types of period columns:
+    - Opening balance: 'Openingsbalans2025' → ('2025-00', date(2025, 1, 1))
+    - Monthly periods: 'januari2025' → ('2025-01', date(2025, 1, 31))
+
+    Args:
+        col_name: Excel column name (case-insensitive).
+
+    Returns:
+        Tuple of (JaarPeriode, LastDate) or None if not a period column.
+        - JaarPeriode: String in format 'YYYY-MM' (or 'YYYY-00' for opening)
+        - LastDate: Last day of the period as a date object
+
+    Example:
+        >>> parse_period_column('januari2025')
+        ('2025-01', datetime.date(2025, 1, 31))
+        >>> parse_period_column('Openingsbalans2025')
+        ('2025-00', datetime.date(2025, 1, 1))
+        >>> parse_period_column('SomeOtherColumn')
+        None
     """
     col_lower = col_name.lower()
 
@@ -117,7 +96,40 @@ def calculate_display_value(row: pd.Series) -> float | None:
 
 
 def transform_trial_balances(input_path: Path, output_path: Path) -> None:
-    """Transform Excel trial balance data to DuckDB."""
+    """
+    Transform Excel trial balance data to DuckDB database.
+
+    Replicates Power Query logic from fac_TrialBalances.m with the following steps:
+    1. Load Excel with monthly period columns
+    2. Unpivot period columns (Openingsbalans, januari-december) to rows
+    3. Calculate JaarPeriode (YYYY-MM format) and LastDate (last day of month)
+    4. Calculate DisplayValue with sign corrections per category (Activa/Passiva)
+    5. Generate synthetic profit rows by aggregating Gross Margin and Expenses
+    6. Pad account codes to 4 digits
+    7. Apply explicit schema for type safety
+    8. Write to DuckDB with validation
+
+    Args:
+        input_path: Path to Excel file containing trial balance data.
+            Expected columns: account codes, names, monthly periods.
+        output_path: Path to output DuckDB database file.
+            Table 'fct_TrialBalances' will be created/replaced.
+
+    Raises:
+        FileNotFoundError: If input Excel file doesn't exist.
+        KeyError: If required columns are missing from Excel.
+        Exception: If database write fails.
+
+    Example:
+        >>> from pathlib import Path
+        >>> input_file = Path("import/2025_BalansenWinstverliesperperiode.xlsx")
+        >>> output_file = Path("export/trial_balances.duckdb")
+        >>> transform_trial_balances(input_file, output_file)
+        Loading Excel file: import/2025_BalansenWinstverliesperperiode.xlsx
+        Loaded 427 rows with 33 columns
+        ...
+        ✓ Verified: 1,775 rows written to fct_TrialBalances table
+    """
 
     # Step 1: Load Excel
     print(f"Loading Excel file: {input_path}")
@@ -228,24 +240,28 @@ def transform_trial_balances(input_path: Path, output_path: Path) -> None:
     print("\nFinal schema:")
     print(final_df.dtypes)
 
-    # Write to DuckDB
-    print(f"Writing to DuckDB: {output_path}")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Validate schema before writing
+    if not validate_schema(final_df, TRIAL_BALANCES_SCHEMA):
+        print("Warning: Schema validation found issues, but continuing...")
 
-    con = duckdb.connect(str(output_path))
-    con.execute("DROP TABLE IF EXISTS fct_TrialBalances")
-    con.execute("CREATE TABLE fct_TrialBalances AS SELECT * FROM final_df")
-
-    # Verify
-    row_count = con.execute("SELECT COUNT(*) FROM fct_TrialBalances").fetchone()[0]
-    print(f"Verified: {row_count} rows written to fct_TrialBalances table")
+    # Write to DuckDB using shared utility
+    print(f"\nWriting to DuckDB: {output_path}")
+    row_count = write_to_duckdb(
+        final_df,
+        str(output_path),
+        "fct_TrialBalances",
+        if_exists="replace"
+    )
+    print(f"✓ Verified: {row_count:,} rows written to fct_TrialBalances table")
 
     # Show sample
+    import duckdb
+    con = duckdb.connect(str(output_path))
     print("\nSample rows:")
     sample = con.execute("SELECT * FROM fct_TrialBalances LIMIT 5").fetchdf()
     print(sample)
-
     con.close()
+
     print("\nDone!")
 
 
