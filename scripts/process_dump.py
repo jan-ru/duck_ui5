@@ -28,6 +28,60 @@ COLUMNS_TO_DROP = [
     "Nummer",
 ]
 
+# Expected schema for transactions table
+TRANSACTIONS_SCHEMA = {
+    "NaamAdministratie": "str",
+    "CodeGrootboekrekening": "str",  # String for padded codes
+    "NaamGrootboekrekening": "str",
+    "Code": "str",
+    "Boekingsnummer": "Int64",  # Nullable integer
+    "Boekdatum": "datetime64[ns]",
+    "Periode": "str",
+    "Code1": "str",
+    "Omschrijving": "str",
+    "Saldo": "float64",
+    "Factuurnummer": "str",
+}
+
+
+def apply_schema(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
+    """
+    Apply explicit data types to DataFrame.
+
+    Args:
+        df: DataFrame to type
+        schema: Dict mapping column names to dtypes
+
+    Returns:
+        DataFrame with corrected types
+    """
+    df_typed = df.copy()
+
+    for col, dtype in schema.items():
+        if col in df_typed.columns:
+            try:
+                if dtype == "datetime64[ns]":
+                    # Handle dates specially
+                    df_typed[col] = pd.to_datetime(df_typed[col], errors="coerce")
+                elif dtype in ["float64", "Float64"]:
+                    # Handle numeric with coercion
+                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce")
+                elif dtype in ["Int64", "int64"]:
+                    # Nullable integer for codes
+                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce").astype("Int64")
+                elif dtype == "str":
+                    # Force string type
+                    df_typed[col] = df_typed[col].astype("str")
+                else:
+                    # Other types
+                    df_typed[col] = df_typed[col].astype(dtype)
+            except Exception as e:
+                print(f"Warning: Could not convert {col} to {dtype}: {e}")
+        else:
+            print(f"Warning: Column {col} not found in DataFrame")
+
+    return df_typed
+
 
 def process_dump(
     input_path: str = "import/DUMP_13jun25.xls",
@@ -55,6 +109,13 @@ def process_dump(
 
     # Pad CodeGrootboekrekening to 4 positions with leading zeros
     df["CodeGrootboekrekening"] = pad_account_code(df["CodeGrootboekrekening"])
+
+    # Apply explicit schema to ensure correct types
+    print("  Applying schema...")
+    df = apply_schema(df, TRANSACTIONS_SCHEMA)
+
+    print(f"  Final schema:")
+    print(df.dtypes)
 
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

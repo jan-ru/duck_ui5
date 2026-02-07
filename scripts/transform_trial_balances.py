@@ -19,6 +19,58 @@ MONTH_MAP = {
 }
 
 
+# Expected schema for fct_TrialBalances table
+TRIAL_BALANCES_SCHEMA = {
+    "CodeGrootboekrekening": "str",
+    "NaamAdministratie": "str",
+    "CodeRelatiekostenplaats": "Int64",  # Nullable integer for codes
+    "NaamRelatiekostenplaats": "str",  # Force string even if all NULL
+    "Value": "float64",
+    "JaarPeriode": "str",
+    "LastDate": "datetime64[ns]",
+    "DisplayValue": "float64",
+}
+
+
+def apply_schema(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
+    """
+    Apply explicit data types to DataFrame.
+
+    Args:
+        df: DataFrame to type
+        schema: Dict mapping column names to dtypes
+
+    Returns:
+        DataFrame with corrected types
+    """
+    df_typed = df.copy()
+
+    for col, dtype in schema.items():
+        if col in df_typed.columns:
+            try:
+                if dtype == "datetime64[ns]":
+                    # Handle dates specially
+                    df_typed[col] = pd.to_datetime(df_typed[col], errors="coerce")
+                elif dtype in ["float64", "Float64"]:
+                    # Handle numeric with coercion
+                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce")
+                elif dtype in ["Int64", "int64"]:
+                    # Nullable integer for codes
+                    df_typed[col] = pd.to_numeric(df_typed[col], errors="coerce").astype("Int64")
+                elif dtype == "str":
+                    # Force string type (handles all-NULL columns)
+                    df_typed[col] = df_typed[col].astype("str")
+                else:
+                    # Other types
+                    df_typed[col] = df_typed[col].astype(dtype)
+            except Exception as e:
+                print(f"Warning: Could not convert {col} to {dtype}: {e}")
+        else:
+            print(f"Warning: Column {col} not found in DataFrame")
+
+    return df_typed
+
+
 def parse_period_column(col_name: str) -> tuple[str, date] | None:
     """
     Parse column name like 'januari2025' or 'Openingsbalans2025' to (JaarPeriode, LastDate).
@@ -168,11 +220,13 @@ def transform_trial_balances(input_path: Path, output_path: Path) -> None:
     # Step 7: Pad CodeGrootboekrekening to 4 digits with leading zeros
     final_df["CodeGrootboekrekening"] = pad_account_code(final_df["CodeGrootboekrekening"])
 
-    # Step 8: Set proper types
-    final_df["Value"] = pd.to_numeric(final_df["Value"], errors="coerce")
-    final_df["DisplayValue"] = pd.to_numeric(final_df["DisplayValue"], errors="coerce")
+    # Step 8: Apply explicit schema to ensure correct types
+    print("Applying schema...")
+    final_df = apply_schema(final_df, TRIAL_BALANCES_SCHEMA)
 
     print(f"Final dataset: {len(final_df)} rows")
+    print("\nFinal schema:")
+    print(final_df.dtypes)
 
     # Write to DuckDB
     print(f"Writing to DuckDB: {output_path}")
