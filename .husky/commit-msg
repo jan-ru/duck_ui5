@@ -1,6 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 # Optional: Validate commit message format
 # Ensures commits follow conventional commits format
 # Examples: feat:, fix:, docs:, chore:, test:, refactor:
