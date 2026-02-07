@@ -57,7 +57,13 @@
       tables: [],
       currentFilters: {},
       columnMetadata: {},
-      columnFormatters: {}
+      columnFormatters: {},
+      pagination: {
+        currentPage: 1,
+        pageSize: 1000,
+        totalRows: 0
+      },
+      worker: null
     };
 
     // Table-specific configuration
@@ -97,6 +103,20 @@
       return value.replace(/'/g, "''");
     }
 
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return '';
+      const div = document.createElement('div');
+      div.textContent = String(text);
+      return div.innerHTML;
+    }
+
+    // Validate SQL identifier (table/column names) to prevent SQL injection
+    function isValidIdentifier(identifier) {
+      // DuckDB identifiers: alphanumeric, underscore, must start with letter or underscore
+      return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier);
+    }
+
     // Format timestamp to dd/mm/yyyy
     function formatDate(timestamp) {
       if (!timestamp) return '';
@@ -119,11 +139,17 @@
     // Populate dropdown with unique values
     async function populateDropdown(dropdown, columnName, defaultText, tableName) {
       try {
+        // Validate identifiers to prevent SQL injection
+        const tableNameOnly = tableName.split('.')[1] || tableName;
+        if (!isValidIdentifier(tableNameOnly) || !isValidIdentifier(columnName)) {
+          throw new Error('Invalid table or column name');
+        }
+
         const query = `SELECT DISTINCT ${columnName} FROM ${tableName} ORDER BY ${columnName}`;
         const result = await viewerState.conn.query(query);
         const rows = result.toArray();
 
-        dropdown.innerHTML = `<option value="">${defaultText}</option>`;
+        dropdown.innerHTML = `<option value="">${escapeHtml(defaultText)}</option>`;
         rows.forEach(row => {
           const option = document.createElement('option');
           option.value = row[columnName];
@@ -140,13 +166,31 @@
       if (!rows.length) return "<p>No data</p>";
       const headers = Object.keys(rows[0]);
       const formatters = viewerState.columnFormatters[viewerState.currentTable] || {};
-      const rowCount = `<div class="row-count">Showing ${rows.length.toLocaleString()} row${rows.length !== 1 ? 's' : ''}</div>`;
+
+      // Calculate pagination info
+      const start = (viewerState.pagination.currentPage - 1) * viewerState.pagination.pageSize + 1;
+      const end = Math.min(start + rows.length - 1, viewerState.pagination.totalRows);
+      const totalPages = Math.ceil(viewerState.pagination.totalRows / viewerState.pagination.pageSize);
+
+      const rowCount = `<div class="row-count">Showing ${start.toLocaleString()}-${end.toLocaleString()} of ${viewerState.pagination.totalRows.toLocaleString()} row${viewerState.pagination.totalRows !== 1 ? 's' : ''}</div>`;
+
+      // Pagination controls
+      const paginationControls = totalPages > 1 ? `
+        <div class="pagination-controls" style="margin: 10px 0;">
+          <button ${viewerState.pagination.currentPage === 1 ? 'disabled' : ''} onclick="changePage(1)">First</button>
+          <button ${viewerState.pagination.currentPage === 1 ? 'disabled' : ''} onclick="changePage(${viewerState.pagination.currentPage - 1})">Previous</button>
+          <span style="margin: 0 10px;">Page ${viewerState.pagination.currentPage} of ${totalPages}</span>
+          <button ${viewerState.pagination.currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${viewerState.pagination.currentPage + 1})">Next</button>
+          <button ${viewerState.pagination.currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${totalPages})">Last</button>
+        </div>
+      ` : '';
 
       return `
         ${rowCount}
+        ${paginationControls}
         <table>
           <thead>
-            <tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr>
+            <tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr>
           </thead>
           <tbody>
             ${rows.map(r => `<tr>${headers.map(h => {
@@ -155,17 +199,32 @@
               const columnMeta = viewerState.columnMetadata[viewerState.currentTable]?.find(c => c.column_name === h);
               const isNumeric = columnMeta && ['DOUBLE', 'DECIMAL', 'FLOAT', 'INTEGER', 'BIGINT'].includes(columnMeta.data_type.toUpperCase().split('(')[0]);
               const align = isNumeric ? ' style="text-align: right;"' : '';
-              return `<td${align}>${value}</td>`;
+              return `<td${align}>${escapeHtml(value)}</td>`;
             }).join("")}</tr>`).join("")}
           </tbody>
         </table>
+        ${paginationControls}
       `;
     }
 
-    async function loadAndDisplayData(query) {
+    async function loadAndDisplayData(query, resetPagination = true) {
       try {
         setLoading(true);
-        const result = await viewerState.conn.query(query);
+
+        if (resetPagination) {
+          viewerState.pagination.currentPage = 1;
+        }
+
+        // Get total row count for pagination
+        const countQuery = query.replace(/SELECT .+ FROM/i, 'SELECT COUNT(*) as total FROM').replace(/LIMIT.*/i, '').replace(/OFFSET.*/i, '');
+        const countResult = await viewerState.conn.query(countQuery);
+        viewerState.pagination.totalRows = Number(countResult.toArray()[0].total);
+
+        // Add pagination to query
+        const offset = (viewerState.pagination.currentPage - 1) * viewerState.pagination.pageSize;
+        const paginatedQuery = `${query.replace(/LIMIT.*/i, '').replace(/OFFSET.*/i, '')} LIMIT ${viewerState.pagination.pageSize} OFFSET ${offset}`;
+
+        const result = await viewerState.conn.query(paginatedQuery);
         const rows = result.toArray();
         out.innerHTML = renderTable(rows);
       } catch (error) {
@@ -174,6 +233,13 @@
         setLoading(false);
       }
     }
+
+    // Pagination change handler (exposed globally for onclick)
+    window.changePage = async function(pageNumber) {
+      viewerState.pagination.currentPage = pageNumber;
+      const whereClause = buildWhereClause();
+      await loadAndDisplayData(`SELECT * FROM ${viewerState.currentTable}${whereClause}`, false);
+    };
 
     // Select default table (prefer transactions from main, or single table if only one)
     function selectDefaultTable(tables) {
@@ -265,22 +331,28 @@
       return filterable;
     }
 
-    // Generate filter UI dynamically
+    // Generate filter UI dynamically (parallelized for performance)
     async function generateFilterUI(filterColumns, tableName) {
       const container = document.getElementById('filter-container');
       container.innerHTML = '';
       viewerState.currentFilters = {};
 
-      for (const filterCol of filterColumns) {
+      // Create all dropdowns first
+      const dropdowns = filterColumns.map(filterCol => {
         const select = document.createElement('select');
         select.id = `filter_${filterCol.name}`;
-
-        await populateDropdown(select, filterCol.name, `Select ${filterCol.name}...`, tableName);
-
         select.onchange = applyFilters;
         container.appendChild(select);
         viewerState.currentFilters[filterCol.name] = select;
-      }
+        return { select, filterCol };
+      });
+
+      // Populate all dropdowns in parallel
+      await Promise.all(
+        dropdowns.map(({ select, filterCol }) =>
+          populateDropdown(select, filterCol.name, `Select ${filterCol.name}...`, tableName)
+        )
+      );
     }
 
     // Generate buttons dynamically
@@ -385,12 +457,21 @@
       try {
         setLoading(true);
 
+        // Cleanup old worker to prevent memory leaks
+        if (viewerState.worker) {
+          viewerState.worker.terminate();
+          viewerState.worker = null;
+        }
+
         // Load DuckDB-WASM bundle
         const bundles = duckdb.getJsDelivrBundles();
         const bundle = await duckdb.selectBundle(bundles);
         const worker = new Worker(URL.createObjectURL(
           new Blob([`importScripts("${bundle.mainWorker}")`])
         ));
+
+        // Store worker reference for cleanup
+        viewerState.worker = worker;
 
         const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
         await db.instantiate(bundle.mainModule);
@@ -425,6 +506,11 @@
       const conditions = [];
       Object.entries(viewerState.currentFilters).forEach(([colName, filterElement]) => {
         if (filterElement.value) {
+          // Validate column name to prevent SQL injection
+          if (!isValidIdentifier(colName)) {
+            console.warn(`Skipping invalid column name: ${colName}`);
+            return;
+          }
           conditions.push(`${colName} = '${escapeSql(filterElement.value)}'`);
         }
       });
@@ -439,6 +525,13 @@
 
     // Generic rollup function
     async function performRollup(tableName, groupByColumns, aggregateColumn) {
+      // Validate all column names to prevent SQL injection
+      const invalidCols = [...groupByColumns, aggregateColumn].filter(col => !isValidIdentifier(col));
+      if (invalidCols.length > 0) {
+        showError(`Invalid column names: ${invalidCols.join(', ')}`);
+        return;
+      }
+
       const whereClause = buildWhereClause();
       const query = `
         SELECT
