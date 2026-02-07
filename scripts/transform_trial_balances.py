@@ -254,12 +254,32 @@ def transform_trial_balances(input_path: Path, output_path: Path) -> None:
     )
     print(f"✓ Verified: {row_count:,} rows written to fct_TrialBalances table")
 
-    # Show sample
+    # Create views for common queries
     import duckdb
     con = duckdb.connect(str(output_path))
-    print("\nSample rows:")
+
+    print("\nCreating views...")
+
+    # View 1: Unique account codes
+    con.execute("""
+        CREATE OR REPLACE VIEW vw_UniqueAccountCodes AS
+        SELECT DISTINCT CodeGrootboekrekening
+        FROM fct_TrialBalances
+        ORDER BY CodeGrootboekrekening
+    """)
+    unique_count = con.execute("SELECT COUNT(*) FROM vw_UniqueAccountCodes").fetchone()[0]
+    print(f"  ✓ Created vw_UniqueAccountCodes ({unique_count} unique codes)")
+
+    # Show sample
+    print("\nSample rows from fct_TrialBalances:")
     sample = con.execute("SELECT * FROM fct_TrialBalances LIMIT 5").fetchdf()
     print(sample)
+
+    # Show sample of unique codes
+    print("\nSample from vw_UniqueAccountCodes (first 10):")
+    codes = con.execute("SELECT * FROM vw_UniqueAccountCodes LIMIT 10").fetchdf()
+    print(codes)
+
     con.close()
 
     print("\nDone!")

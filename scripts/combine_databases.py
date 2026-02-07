@@ -80,12 +80,24 @@ def combine_databases(
     trial_balance_count = con.execute("SELECT COUNT(*) FROM fct_TrialBalances").fetchone()[0]
     print(f"    ✓ Copied {trial_balance_count:,} rows")
 
+    # Create views for common queries
+    print("  Creating views...")
+    con.execute("""
+        CREATE OR REPLACE VIEW vw_UniqueAccountCodes AS
+        SELECT DISTINCT CodeGrootboekrekening
+        FROM fct_TrialBalances
+        ORDER BY CodeGrootboekrekening
+    """)
+    unique_count = con.execute("SELECT COUNT(*) FROM vw_UniqueAccountCodes").fetchone()[0]
+    print(f"    ✓ Created vw_UniqueAccountCodes ({unique_count} unique codes)")
+
     # Close connection
     con.close()
 
     total_rows = transaction_count + trial_balance_count
     print(f"\n✓ Combined database created: {output_db}")
     print(f"  Tables: 2")
+    print(f"  Views: 1")
     print(f"  Total rows: {total_rows:,}")
 
 

@@ -203,10 +203,14 @@ Merges the following databases into `export/combined.db`:
 - `export/2023_transactions.db` → `transactions` table
 - `export/trial_balances.duckdb` → `fct_TrialBalances` table
 
+**Also creates:**
+- `vw_UniqueAccountCodes` view - List of all unique account codes from trial balances
+
 This allows you to:
 - Load both datasets in the web viewer simultaneously
 - Query across both tables using SQL joins
 - View the complete schema in the Schema page showing both tables and their relationships
+- Access a ready-made view of unique account codes
 
 ### When to Use
 
@@ -233,6 +237,57 @@ Pads CodeGrootboekrekening (account codes) to 4 digits with leading zeros.
 - `transform_trial_balances.py` - Pads trial balance account codes
 
 This ensures consistent account code formatting across all datasets.
+
+## Database Views
+
+The transformation scripts automatically create useful views in the DuckDB databases:
+
+### `vw_UniqueAccountCodes`
+
+**Purpose:** Provides a deduplicated list of all account codes from the trial balances.
+
+**Definition:**
+```sql
+CREATE VIEW vw_UniqueAccountCodes AS
+SELECT DISTINCT CodeGrootboekrekening
+FROM fct_TrialBalances
+ORDER BY CodeGrootboekrekening;
+```
+
+**Created by:**
+- `transform_trial_balances.py` - In `export/trial_balances.duckdb`
+- `combine_databases.py` - In `export/combined.db`
+
+**Usage:**
+```sql
+-- Get all unique account codes
+SELECT * FROM vw_UniqueAccountCodes;
+
+-- Count unique codes
+SELECT COUNT(*) FROM vw_UniqueAccountCodes;
+
+-- Find codes starting with '08'
+SELECT * FROM vw_UniqueAccountCodes WHERE CodeGrootboekrekening LIKE '08%';
+```
+
+**Example output:**
+```
+CodeGrootboekrekening
+---------------------
+0080
+0081
+0210
+0211
+0220
+...
+(227 unique codes)
+```
+
+**Use cases:**
+- Chart of accounts reference
+- Account code validation
+- Reporting and analysis queries
+- Data quality checks
 
 ## Data Validation
 
