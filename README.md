@@ -140,8 +140,10 @@ duck_ui5/
 │   ├── process_dump.py     # Transaction data transformation
 │   ├── transform_trial_balances.py # Trial balance transformation
 │   ├── combine_databases.py # Combine multiple databases
+│   ├── validate_account_codes.py # Validate data consistency
 │   └── main.py             # Entry point (if needed)
-├── fac_TrialBalances.m     # Reference Power Query logic
+├── m_code/                 # Power Query reference code
+│   └── fac_TrialBalances.m # Reference Power Query logic
 ├── package.json           # Node.js package configuration
 ├── LICENSE.md             # MIT License
 ├── .gitignore             # Git ignore rules
@@ -231,6 +233,79 @@ Pads CodeGrootboekrekening (account codes) to 4 digits with leading zeros.
 - `transform_trial_balances.py` - Pads trial balance account codes
 
 This ensures consistent account code formatting across all datasets.
+
+## Data Validation
+
+### Validate Account Code Consistency
+
+The `scripts/validate_account_codes.py` script validates that all account codes in transactions exist in the trial balances chart of accounts.
+
+**Usage:**
+```bash
+# Using Python directly
+python scripts/validate_account_codes.py
+
+# Or via Makefile
+make validate
+
+# Or via CLI (after pip install -e .)
+validate-account-codes
+```
+
+**Command-line options:**
+```bash
+# Use custom file paths
+python scripts/validate_account_codes.py \
+  --transactions import/DUMP_13jun25.xls \
+  --trial-balances import/2025_BalansenWinstverliesperperiode.xlsx
+
+# Strict mode (exit with error code if validation fails)
+python scripts/validate_account_codes.py --strict
+```
+
+**Output format:**
+```
+================================================================================
+ACCOUNT CODE VALIDATION REPORT
+================================================================================
+
+📊 SUMMARY
+--------------------------------------------------------------------------------
+Transaction codes:      215 unique codes
+Trial balance codes:    427 unique codes
+Codes in both:          215 codes
+Coverage:              100.0%
+
+🔍 VALIDATION RESULTS
+--------------------------------------------------------------------------------
+✅ VALIDATION PASSED: All transaction codes exist in trial balances
+
+ℹ️  INFO: 212 codes exist only in trial balances (not used in transactions)
+--------------------------------------------------------------------------------
+  - 0100
+  - 0101
+  ... (showing first 20)
+
+✓ SAMPLE OF MATCHING CODES (showing 10 of 215):
+--------------------------------------------------------------------------------
+  - 0080
+  - 0081
+  - 0210
+  ... (showing first 10)
+
+================================================================================
+```
+
+**Validation checks:**
+- ✅ All transaction account codes exist in trial balances (required)
+- ℹ️  Extra codes in trial balances only (informational, not an error)
+- 📊 Coverage percentage
+- 📋 List of missing codes (if any)
+
+**When to use:**
+- Before data analysis to ensure referential integrity
+- After updating source files to verify consistency
+- As part of CI/CD pipeline with `--strict` flag
 
 ## Data Transformations
 

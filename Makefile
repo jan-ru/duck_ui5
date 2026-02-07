@@ -1,4 +1,4 @@
-.PHONY: help install install-dev setup-hooks format lint test clean run-all
+.PHONY: help install install-dev setup-hooks format lint test clean run-all validate
 
 help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -39,6 +39,9 @@ clean:  ## Clean generated files
 	rm -rf .mypy_cache
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
+
+validate:  ## Validate account code consistency between source files
+	python scripts/validate_account_codes.py
 
 run-all:  ## Run all transformation scripts
 	@echo "Processing transaction dump..."

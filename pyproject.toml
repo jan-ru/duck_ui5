@@ -36,6 +36,7 @@ dev = [
 process-dump = "scripts.process_dump:main"
 transform-trial-balances = "scripts.transform_trial_balances:main"
 combine-databases = "scripts.combine_databases:main"
+validate-account-codes = "scripts.validate_account_codes:main"
 
 [build-system]
 requires = ["hatchling"]
